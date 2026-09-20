@@ -1,3 +1,5 @@
+
+
 # TranslationDiff
 
 A translation cache that helps translate only changes between revisions of long texts.
@@ -143,7 +145,7 @@ Or install it yourself as:
 
     $ gem install translation_diff
 
-This gem loads `ox`, `pragmatic_segmenter`, `faraday`, and `faraday-retry` at require time. `aws-sigv4`, `redis`, `connection_pool`, `redis-namespace`, and `ratelimit` are yours to add, only if you use the feature that needs them -- see [Dependencies](docs/configuration.md#dependencies).
+This gem loads `ox`, `pragmatic_segmenter`, `faraday`, and `faraday-retry` at require time. `aws-sigv4`, `activerecord`, `redis`, `connection_pool`, `redis-namespace`, and `ratelimit` are yours to add, only if you use the feature that needs them -- see [Dependencies](docs/configuration.md#dependencies).
 
 ## Documentation
 
