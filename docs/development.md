@@ -6,7 +6,7 @@ This gem was published as `deepl_diff` through 2.2.0. `deepl_diff` is
 deprecated in favor of `translation_diff`, which is functionally the same
 gem under a name that no longer implies a dependency on DeepL specifically.
 
-**Upgrading from `deepl_diff`:** every cache key changed in 3.1.0 -- the
+**Upgrading from `deepl_diff`:** every cache key changed in translation_diff 1.0.0 -- the
 provider, the provider options and normalised language codes are now part of
 the key. Nothing cached previously is reused; the next translation of every
 sentence is a cache miss, once, everywhere. `TranslationDiff.api`, `.cache_store`,
@@ -15,7 +15,7 @@ versions configured directly -- are gone; configure `TranslationDiff.config`
 (or use `TranslationDiff.configure`) instead. If you have `rate_limit`
 configured, also read the upgrading note in
 [The rate limiter contract](contracts.md#the-rate-limiter-contract): the limiter was
-never actually enforcing your threshold before 3.1.0, and it starts doing so
+never actually enforcing your threshold before translation_diff 1.0.0, and it starts doing so
 now. See [CHANGELOG.md](../CHANGELOG.md) for the full list of breaking changes.
 
 **If you registered a custom provider,** it must now subclass

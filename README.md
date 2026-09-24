@@ -1,8 +1,8 @@
-
-
 # TranslationDiff
 
 A translation cache that helps translate only changes between revisions of long texts.
+
+Formerly published as [`deepl_diff`](https://rubygems.org/gems/deepl_diff) -- see [Former name and upgrading](docs/development.md#former-name-and-upgrading).
 
 ## Why TranslationDiff?
 

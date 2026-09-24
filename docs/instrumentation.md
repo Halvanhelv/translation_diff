@@ -64,7 +64,7 @@ built-in providers (DeepL, Azure, ModernMT) report billing at all -- the
 other three always answer `nil`. `model` is the model the provider used,
 when it names one, and `nil` otherwise.
 
-**`cache` fires once per call as of 3.1.0, not once per chunk.** The cache is
+**`cache` fires once per call as of translation_diff 1.0.0, not once per chunk.** The cache is
 now consulted for every sentence in one `read_multi` before anything is
 batched, so there is one event where there used to be one per chunk. `hits`
 and `misses` still sum to the same totals over a call, so a counter that adds

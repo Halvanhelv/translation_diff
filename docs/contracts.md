@@ -42,7 +42,7 @@ configures no `rate_limit` never needs it, and its absence raises
 `TranslationDiff::Error` naming the gem to add. `activerecord` is never a
 dependency either -- see [SQL cache](sql-cache.md#the-activerecord-version-floor).
 
-**Upgrading to 3.1.0: re-validate your `rate_limit` threshold.** Before this
+**Upgrading to translation_diff 1.0.0: re-validate your `rate_limit` threshold.** Before this
 release, `RateLimiters::Redis` never actually limited anything -- a signature
 mismatch with the `ratelimit` gem meant it recorded hits under a subject
 `exceeded?` never read, so the threshold could never be reached. That bug
