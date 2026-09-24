@@ -4,7 +4,10 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.0.0] - 2026-09-24
+
+First release under the name **translation_diff**. This gem was published as
+`deepl_diff` through 2.2.0; everything here is relative to `deepl_diff` 2.2.0.
 
 ### Breaking
 
@@ -59,6 +62,151 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and the rest of the symbol-keyed configuration are unaffected -- only
   the constant a name resolves to changed. See
   [Caching](docs/caching.md) and [SQL cache](docs/sql-cache.md).
+
+- Renamed the gem to `translation_diff` and the module to `TranslationDiff`.
+- The provider (`config.provider`; see Removed below for what replaced the
+  old `TranslationDiff.api` accessor) must satisfy the five-method contract
+  (`translate`, optional `detect`, `max_request_size`, `max_batch_size`,
+  `cache_key`) instead of being a raw client such as `DeepL`.
+- `translate` takes keyword arguments -- `translate(values, from:, to:, **options)`
+  -- and no longer accepts a positional options hash.
+- Request-size and batch-size limits moved out of `Chunker` and into the
+  provider (`#max_request_size`, `#max_batch_size`); they are no longer
+  hard-coded to DeepL's numbers.
+- **Every cache key changes.** The key now includes the provider's
+  `cache_key`, a digest of the provider options, and lowercased language
+  codes. Nothing cached by `deepl_diff` -- or by an earlier `translation_diff`
+  prerelease -- is reused. The next translation of every sentence is a cache
+  miss, once, everywhere.
+- Dropped `punkt-segmenter` and, with it, its `unicode_utils` dependency.
+  Sentence boundaries are now produced by `config.segmenter`,
+  defaulting to `TranslationDiff::Segmenters::Pragmatic`, backed by the
+  [`pragmatic_segmenter`](https://github.com/diasks2/pragmatic_segmenter) gem
+  (MIT, zero dependencies of its own) -- so `ox` and `pragmatic_segmenter` are
+  now the gem's only two runtime dependencies. Measured against the Golden
+  Rules corpus -- the `context "Golden Rules" do` block of each of the 10
+  per-language spec files on `diasks2/pragmatic_segmenter`, 80 exemplars in
+  total; a sample of the same corpus is in
+  `test/translation_diff/golden_rules_test.rb` -- the default now scores
+  76/80 against punkt's 38/80 and the old in-house segmenter's 47/80; the
+  gap is largest on languages with no letter case at all -- Arabic, Hindi,
+  Armenian, Greek -- which the in-house segmenter cannot reason about by
+  design.
+- `config.segmenter_instance.split_offsets` now takes a second, optional
+  `language:` keyword argument. `pragmatic_segmenter` picks its rule set by
+  language and falls back to English rules without one, which can
+  mis-segment other languages (Russian abbreviations, for one); `from:` is
+  the only way a caller supplies it, and only when segmentation happens
+  before language detection would need to run. `Segmenters::Pragmatic`
+  normalises the code first -- downcased, region subtag dropped -- and falls
+  back to English for anything `pragmatic_segmenter` does not recognise
+  afterward. Without this, DeepL's own codes (`"RU"`, `"EN-GB"`) missed their
+  rule set entirely: `pragmatic_segmenter`'s lookup is case-sensitive and
+  region-blind, so this gem's own flagship provider was hitting the broken
+  path on every call.
+- **`config.rate_limit` now actually enforces the threshold you configure.**
+  `TranslationDiff::RedisRateLimiter` called `Ratelimit#add(size)`, but that
+  gem's signature is `add(subject, count = 1)` -- so it recorded the hit
+  under a subject *named after the character count*, while `exceeded?`
+  checked a subject nothing ever incremented. The limiter never limited
+  anything, in every release back to `v1.0.2` (tagged 2023-02-16, roughly
+  three years ago). If you have `rate_limit` configured, your traffic has
+  never actually been throttled; on upgrading to 3.1.0 it will be, for the
+  first time, against a threshold you set once and have never seen fire. You
+  changed no configuration, but your throttling behaviour changes on
+  upgrade. Re-validate `rate_limit` and `rate_interval` before upgrading --
+  see "Rate limiting" in the README.
+- `rate_interval` is silently clamped by the `ratelimit` gem's fixed bucket
+  span to roughly **5-600 seconds** (measured: `3600` becomes `600`, `1`
+  becomes `5`). Combined with a limiter that now actually fires, an interval
+  configured above 600 seconds is enforced over 600 seconds instead -- up to
+  six times more eager than the configuration reads. Keep `rate_interval`
+  within that range, or expect a tighter effective window than configured.
+- Providers must inherit `TranslationDiff::Provider`. A duck-typed object is
+  no longer accepted: the base class supplies the transport, the
+  configuration check and the capability defaults, and a provider without
+  them is a provider that fails in the ways this library has already been
+  bitten by twice.
+- `provider.translate(texts, from:, to:, **options)` is now
+  `provider.translate(request)`, taking a `Translation::Request` and
+  returning a `Translation::Response`. The response carries the detected
+  source language and, where the provider reports it, the characters billed.
+- `max_request_size` and `max_batch_size` move from provider methods to
+  `Capabilities`.
+- `TranslationDiff::Providers::Naming` is gone; the registry stamps
+  `cache_key` and `Provider` implements it.
+- Every provider normalises language codes to the casing its own vendor
+  documents and accepts either casing from the caller: DeepL upper-cases, the
+  other five lower-case. A code carrying a script or region subtag
+  (`"zh-Hans"`, `"pt-BR"`) is passed through untouched. `Provider#language`
+  is the shared rule and `self.language_case` selects the casing, so a
+  provider of your own gets it by inheriting. Previously only Google and
+  DeepL normalised at all -- Amazon Translate rejected `"EN"`/`"RU"` and
+  LibreTranslate answered 400, on every call, for anyone who followed the
+  README's "switch provider by changing `config.provider`" with DeepL-style
+  codes -- and DeepL upper-cased subtags too, corrupting `"zh-Hans"`.
+- `deepl-rb` and `google-cloud-translate-v2` are no longer used at all.
+  `faraday` and `faraday-retry` become runtime dependencies; `aws-sigv4` is
+  required lazily by the Amazon provider only.
+- `config.deepl_host` is renamed `config.deepl_api_base`, matching the
+  `<provider>_api_base` name every other provider uses. There is no alias: a
+  configuration still setting `deepl_host` raises `NoMethodError` on
+  `TranslationDiff.configure`. Rename it.
+- A provider returning the wrong number of translations now raises
+  `TranslationDiff::ResponseError`, not the error that used to live on
+  `Request`; a `rescue` written to catch a short response that way no longer
+  catches one. Both are `TranslationDiff::Error`, so a rescue of the base
+  class is unaffected.
+- A provider returning a well-formed response that carries no translation for
+  one input -- Azure answers 200 for a batch where a single string failed --
+  also raises `TranslationDiff::ResponseError`, naming the position. It
+  previously reached the spacing step and died there as `NoMethodError`.
+- **The translation pipeline is new code.** `TranslationDiff::Linearizer`,
+  `Spacing`, `Chunker`, `Tokenizer`, `Cache` and `Request` are gone as public
+  constants. What replaces them: `Document` and `Leaves` (walking the
+  caller's structure), `Passage`, `Fragment` and `Segment` (markup and prose,
+  cut into sentences), `Markup` (entity references and a `<` that opens no
+  tag), `Batch` (packing sentences into provider requests), `SentenceCache`
+  (the cache key, read and write) and `Translator` (the coordinator
+  `TranslationDiff.translate` and `Context#translate` now build). See
+  [How it works](docs/how-it-works.md). If you referenced any of the six by
+  name, that reference is now a `NameError`.
+- `TranslationDiff::Request::Error` is now `TranslationDiff::Translator::Error`
+  and `TranslationDiff::Cache::Error` is now
+  `TranslationDiff::SentenceCache::Error`. There is no alias for either: this
+  gem has never been published under the name `translation_diff` with those
+  constants in it. `TranslationDiff::Chunker::Error` is gone with no
+  replacement -- a single sentence too large to send now raises
+  `TranslationDiff::Batch::Error`. All three remain
+  `TranslationDiff::Error`, so a rescue of the base class is unaffected.
+- **`TranslationDiff.translate` and `Context#translate` raise `ArgumentError`
+  when `to:` is missing or `nil`.** The keyword still defaults to `nil` in the
+  signature, and the message names it. Previously a `nil` target compared
+  equal to a `nil` source, the call short-circuited as "same language" and
+  your values came back untranslated, silently. If you have a caller reading
+  `to:` out of a configuration that can be blank, it has been a no-op and will
+  now raise.
+- **The `cache` instrumentation event fires once per `translate` call, not
+  once per chunk.** The cache is now consulted for every sentence in one
+  `read_multi` before anything is batched. `hits` and `misses` still sum to
+  the same totals over a call, so a counter that adds them up is unaffected;
+  a counter of *events*, or a histogram of per-chunk hit ratios, will see the
+  cardinality drop. `request` and `rate_limit` still fire once per batch sent.
+- **Two more cache keys move, beyond the entity and `<` fixes below.** A
+  sentence padded with Unicode whitespace -- a non-breaking space, say -- now
+  keys as the bare sentence: the pipeline uses one Unicode-aware definition
+  of padding everywhere, where the key used to be built with ASCII `strip`,
+  which leaves a `U+00A0` in place. And the whole document key format is
+  otherwise unmoved: it is pinned by test against recorded values, and every
+  other input in the corpus this rewrite was judged against produces the same
+  key it did before.
+
+### Removed
+
+- The four module-level accessors (`TranslationDiff.api`, `.cache_store`,
+  `.segmenter`, `.rate_limiter`) and `TranslationDiff::CACHE_NAMESPACE`.
+  Every setting now lives on `TranslationDiff::Configuration`, reached
+  through `TranslationDiff.config` or `TranslationDiff.configure`.
 
 ### Added
 
@@ -227,219 +375,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   each other -- see
   [The three write paths fail differently](docs/caching.md#the-three-write-paths-fail-differently).
 
-### Fixed
-
-- **A `notranslate` span nested inside an opaque element (`pre`, `code`,
-  `script` or `style`) no longer silences every sentence after it.**
-  Closing the protected span used to leave the scanner's own opacity depth
-  one too high, so nothing past it was ever handed to the segmenter again.
-  Found while adding the `pre`/`code` opaque elements above, and fixed the
-  same way for all four. See [How it works](docs/how-it-works.md#html).
-- **Google and DeepL translations in HTML mode no longer come back
-  double-escaped.** Both vendors return entity-escaped text -- an
-  apostrophe as `&#39;`, a quote as `&quot;`, an ampersand as `&amp;` -- and
-  the pipeline decoded entities on the way in but never on the way out, so
-  the renderer escaped the vendor's own `&` a second time and a reader saw
-  `didn&#39;t` on the page. English is full of apostrophes, so in practice
-  every Google or DeepL translation into English was affected somewhere.
-  `TranslationDiff::Translation::Response.build` now decodes a provider's
-  reply the same way it already decoded the source, symmetrically, for
-  every provider -- named entities, and both the decimal (`&#39;`) and hex
-  (`&#x27;`) numeric forms, are decoded; an entity neither decoder
-  recognizes is left exactly as it arrived. See [How it
-  works](docs/how-it-works.md).
-- **Behaviour change: a literal `<` in a source sentence now renders as
-  `&lt;`.** Decoding the fix above exposed a second bug: a provider's own
-  `&lt;` now decoded to a bare `<`, and a bare `<` in front of a letter
-  reads as an opening tag -- a provider could inject markup into the
-  rendered document. A translated `<` that is not shaped like a tag is now
-  escaped on render instead. `if a < b then stop.` used to come back with
-  the bare `<` exactly as written; it now comes back
-  `if a &lt; b then stop.`, the correct HTML encoding of that character and
-  identical once a browser renders it -- but visible to anything comparing
-  output byte-for-byte against an earlier release. `>` is untouched: a
-  stray `>` never opens anything a parser would honour. See [How it
-  works](docs/how-it-works.md#html).
-- **A warm cache keeps serving the corrupted text after you upgrade.** A
-  cache entry's key is derived from the source sentence, not from the value
-  stored under it, so an entry written before this fix is served exactly as
-  it was written until it expires -- upgrading alone does not clear it.
-  Give the configuration a new `cache_namespace`, or let `cache_ttl` lapse,
-  to force every sentence to be retranslated under the fix. See
-  [Caching](docs/caching.md).
-
-### Security
-
-- `Configuration#inspect` and `Provider#inspect` print `[FILTERED]` in place
-  of every credential option's value, instead of the credential itself. The
-  filtered set is derived, not hand-maintained: option names matching a
-  sensitive pattern, plus whatever each registered provider declares in
-  `sensitive_options`. A non-credential option -- a base URL, a region,
-  `cache_namespace` -- stays visible in full. A URL-valued option that
-  carries a credential in its userinfo, `redis_url` included, has just that
-  part redacted (`rediss://default:[FILTERED]@cache.example.upstash.io:6379`);
-  the scheme, host, port and path stay visible. See
-  [Providers](docs/providers.md).
-
-## [3.1.0] - 2026-09-08
-
-First release under the name **translation_diff**. This gem was published as
-`deepl_diff` through 2.2.0.
-
-There is no 3.0.0 entry. That version was tagged during the rename and then
-held back before it reached RubyGems, so no `translation_diff` gem was ever
-published as 3.0.0 and the tag names a commit that predates most of what is
-described below. Everything here is relative to `deepl_diff` 2.2.0.
-
-### Breaking
-
-- Renamed the gem to `translation_diff` and the module to `TranslationDiff`.
-- The provider (`config.provider`; see Removed below for what replaced the
-  old `TranslationDiff.api` accessor) must satisfy the five-method contract
-  (`translate`, optional `detect`, `max_request_size`, `max_batch_size`,
-  `cache_key`) instead of being a raw client such as `DeepL`.
-- `translate` takes keyword arguments -- `translate(values, from:, to:, **options)`
-  -- and no longer accepts a positional options hash.
-- Request-size and batch-size limits moved out of `Chunker` and into the
-  provider (`#max_request_size`, `#max_batch_size`); they are no longer
-  hard-coded to DeepL's numbers.
-- **Every cache key changes.** The key now includes the provider's
-  `cache_key`, a digest of the provider options, and lowercased language
-  codes. Nothing cached by `deepl_diff` -- or by an earlier `translation_diff`
-  prerelease -- is reused. The next translation of every sentence is a cache
-  miss, once, everywhere.
-- Dropped `punkt-segmenter` and, with it, its `unicode_utils` dependency.
-  Sentence boundaries are now produced by `config.segmenter`,
-  defaulting to `TranslationDiff::Segmenters::Pragmatic`, backed by the
-  [`pragmatic_segmenter`](https://github.com/diasks2/pragmatic_segmenter) gem
-  (MIT, zero dependencies of its own) -- so `ox` and `pragmatic_segmenter` are
-  now the gem's only two runtime dependencies. Measured against the Golden
-  Rules corpus -- the `context "Golden Rules" do` block of each of the 10
-  per-language spec files on `diasks2/pragmatic_segmenter`, 80 exemplars in
-  total; a sample of the same corpus is in
-  `test/translation_diff/golden_rules_test.rb` -- the default now scores
-  76/80 against punkt's 38/80 and the old in-house segmenter's 47/80; the
-  gap is largest on languages with no letter case at all -- Arabic, Hindi,
-  Armenian, Greek -- which the in-house segmenter cannot reason about by
-  design.
-- `config.segmenter_instance.split_offsets` now takes a second, optional
-  `language:` keyword argument. `pragmatic_segmenter` picks its rule set by
-  language and falls back to English rules without one, which can
-  mis-segment other languages (Russian abbreviations, for one); `from:` is
-  the only way a caller supplies it, and only when segmentation happens
-  before language detection would need to run. `Segmenters::Pragmatic`
-  normalises the code first -- downcased, region subtag dropped -- and falls
-  back to English for anything `pragmatic_segmenter` does not recognise
-  afterward. Without this, DeepL's own codes (`"RU"`, `"EN-GB"`) missed their
-  rule set entirely: `pragmatic_segmenter`'s lookup is case-sensitive and
-  region-blind, so this gem's own flagship provider was hitting the broken
-  path on every call.
-- **`config.rate_limit` now actually enforces the threshold you configure.**
-  `TranslationDiff::RedisRateLimiter` called `Ratelimit#add(size)`, but that
-  gem's signature is `add(subject, count = 1)` -- so it recorded the hit
-  under a subject *named after the character count*, while `exceeded?`
-  checked a subject nothing ever incremented. The limiter never limited
-  anything, in every release back to `v1.0.2` (tagged 2023-02-16, roughly
-  three years ago). If you have `rate_limit` configured, your traffic has
-  never actually been throttled; on upgrading to 3.1.0 it will be, for the
-  first time, against a threshold you set once and have never seen fire. You
-  changed no configuration, but your throttling behaviour changes on
-  upgrade. Re-validate `rate_limit` and `rate_interval` before upgrading --
-  see "Rate limiting" in the README.
-- `rate_interval` is silently clamped by the `ratelimit` gem's fixed bucket
-  span to roughly **5-600 seconds** (measured: `3600` becomes `600`, `1`
-  becomes `5`). Combined with a limiter that now actually fires, an interval
-  configured above 600 seconds is enforced over 600 seconds instead -- up to
-  six times more eager than the configuration reads. Keep `rate_interval`
-  within that range, or expect a tighter effective window than configured.
-- Providers must inherit `TranslationDiff::Provider`. A duck-typed object is
-  no longer accepted: the base class supplies the transport, the
-  configuration check and the capability defaults, and a provider without
-  them is a provider that fails in the ways this library has already been
-  bitten by twice.
-- `provider.translate(texts, from:, to:, **options)` is now
-  `provider.translate(request)`, taking a `Translation::Request` and
-  returning a `Translation::Response`. The response carries the detected
-  source language and, where the provider reports it, the characters billed.
-- `max_request_size` and `max_batch_size` move from provider methods to
-  `Capabilities`.
-- `TranslationDiff::Providers::Naming` is gone; the registry stamps
-  `cache_key` and `Provider` implements it.
-- Every provider normalises language codes to the casing its own vendor
-  documents and accepts either casing from the caller: DeepL upper-cases, the
-  other five lower-case. A code carrying a script or region subtag
-  (`"zh-Hans"`, `"pt-BR"`) is passed through untouched. `Provider#language`
-  is the shared rule and `self.language_case` selects the casing, so a
-  provider of your own gets it by inheriting. Previously only Google and
-  DeepL normalised at all -- Amazon Translate rejected `"EN"`/`"RU"` and
-  LibreTranslate answered 400, on every call, for anyone who followed the
-  README's "switch provider by changing `config.provider`" with DeepL-style
-  codes -- and DeepL upper-cased subtags too, corrupting `"zh-Hans"`.
-- `deepl-rb` and `google-cloud-translate-v2` are no longer used at all.
-  `faraday` and `faraday-retry` become runtime dependencies; `aws-sigv4` is
-  required lazily by the Amazon provider only.
-- `config.deepl_host` is renamed `config.deepl_api_base`, matching the
-  `<provider>_api_base` name every other provider uses. There is no alias: a
-  configuration still setting `deepl_host` raises `NoMethodError` on
-  `TranslationDiff.configure`. Rename it.
-- A provider returning the wrong number of translations now raises
-  `TranslationDiff::ResponseError`, not the error that used to live on
-  `Request`; a `rescue` written to catch a short response that way no longer
-  catches one. Both are `TranslationDiff::Error`, so a rescue of the base
-  class is unaffected.
-- A provider returning a well-formed response that carries no translation for
-  one input -- Azure answers 200 for a batch where a single string failed --
-  also raises `TranslationDiff::ResponseError`, naming the position. It
-  previously reached the spacing step and died there as `NoMethodError`.
-- **The translation pipeline is new code.** `TranslationDiff::Linearizer`,
-  `Spacing`, `Chunker`, `Tokenizer`, `Cache` and `Request` are gone as public
-  constants. What replaces them: `Document` and `Leaves` (walking the
-  caller's structure), `Passage`, `Fragment` and `Segment` (markup and prose,
-  cut into sentences), `Markup` (entity references and a `<` that opens no
-  tag), `Batch` (packing sentences into provider requests), `SentenceCache`
-  (the cache key, read and write) and `Translator` (the coordinator
-  `TranslationDiff.translate` and `Context#translate` now build). See
-  [How it works](docs/how-it-works.md). If you referenced any of the six by
-  name, that reference is now a `NameError`.
-- `TranslationDiff::Request::Error` is now `TranslationDiff::Translator::Error`
-  and `TranslationDiff::Cache::Error` is now
-  `TranslationDiff::SentenceCache::Error`. There is no alias for either: this
-  gem has never been published under the name `translation_diff` with those
-  constants in it. `TranslationDiff::Chunker::Error` is gone with no
-  replacement -- a single sentence too large to send now raises
-  `TranslationDiff::Batch::Error`. All three remain
-  `TranslationDiff::Error`, so a rescue of the base class is unaffected.
-- **`TranslationDiff.translate` and `Context#translate` raise `ArgumentError`
-  when `to:` is missing or `nil`.** The keyword still defaults to `nil` in the
-  signature, and the message names it. Previously a `nil` target compared
-  equal to a `nil` source, the call short-circuited as "same language" and
-  your values came back untranslated, silently. If you have a caller reading
-  `to:` out of a configuration that can be blank, it has been a no-op and will
-  now raise.
-- **The `cache` instrumentation event fires once per `translate` call, not
-  once per chunk.** The cache is now consulted for every sentence in one
-  `read_multi` before anything is batched. `hits` and `misses` still sum to
-  the same totals over a call, so a counter that adds them up is unaffected;
-  a counter of *events*, or a histogram of per-chunk hit ratios, will see the
-  cardinality drop. `request` and `rate_limit` still fire once per batch sent.
-- **Two more cache keys move, beyond the entity and `<` fixes below.** A
-  sentence padded with Unicode whitespace -- a non-breaking space, say -- now
-  keys as the bare sentence: the pipeline uses one Unicode-aware definition
-  of padding everywhere, where the key used to be built with ASCII `strip`,
-  which leaves a `U+00A0` in place. And the whole document key format is
-  otherwise unmoved: it is pinned by test against recorded values, and every
-  other input in the corpus this rewrite was judged against produces the same
-  key it did before.
-
-### Removed
-
-- The four module-level accessors (`TranslationDiff.api`, `.cache_store`,
-  `.segmenter`, `.rate_limiter`) and `TranslationDiff::CACHE_NAMESPACE`.
-  Every setting now lives on `TranslationDiff::Configuration`, reached
-  through `TranslationDiff.config` or `TranslationDiff.configure`.
-
-### Added
-
 - Five more providers, all on the same base class and the same transport:
   `:google` (Cloud Translation v2), `:azure` (Azure AI Translator v3.0),
   `:modernmt`, `:libretranslate` and `:amazon` (Amazon Translate). Each
@@ -588,6 +523,45 @@ described below. Everything here is relative to `deepl_diff` 2.2.0.
 
 ### Fixed
 
+- **A `notranslate` span nested inside an opaque element (`pre`, `code`,
+  `script` or `style`) no longer silences every sentence after it.**
+  Closing the protected span used to leave the scanner's own opacity depth
+  one too high, so nothing past it was ever handed to the segmenter again.
+  Found while adding the `pre`/`code` opaque elements above, and fixed the
+  same way for all four. See [How it works](docs/how-it-works.md#html).
+- **Google and DeepL translations in HTML mode no longer come back
+  double-escaped.** Both vendors return entity-escaped text -- an
+  apostrophe as `&#39;`, a quote as `&quot;`, an ampersand as `&amp;` -- and
+  the pipeline decoded entities on the way in but never on the way out, so
+  the renderer escaped the vendor's own `&` a second time and a reader saw
+  `didn&#39;t` on the page. English is full of apostrophes, so in practice
+  every Google or DeepL translation into English was affected somewhere.
+  `TranslationDiff::Translation::Response.build` now decodes a provider's
+  reply the same way it already decoded the source, symmetrically, for
+  every provider -- named entities, and both the decimal (`&#39;`) and hex
+  (`&#x27;`) numeric forms, are decoded; an entity neither decoder
+  recognizes is left exactly as it arrived. See [How it
+  works](docs/how-it-works.md).
+- **Behaviour change: a literal `<` in a source sentence now renders as
+  `&lt;`.** Decoding the fix above exposed a second bug: a provider's own
+  `&lt;` now decoded to a bare `<`, and a bare `<` in front of a letter
+  reads as an opening tag -- a provider could inject markup into the
+  rendered document. A translated `<` that is not shaped like a tag is now
+  escaped on render instead. `if a < b then stop.` used to come back with
+  the bare `<` exactly as written; it now comes back
+  `if a &lt; b then stop.`, the correct HTML encoding of that character and
+  identical once a browser renders it -- but visible to anything comparing
+  output byte-for-byte against an earlier release. `>` is untouched: a
+  stray `>` never opens anything a parser would honour. See [How it
+  works](docs/how-it-works.md#html).
+- **A warm cache keeps serving the corrupted text after you upgrade.** A
+  cache entry's key is derived from the source sentence, not from the value
+  stored under it, so an entry written before this fix is served exactly as
+  it was written until it expires -- upgrading alone does not clear it.
+  Give the configuration a new `cache_namespace`, or let `cache_ttl` lapse,
+  to force every sentence to be retranslated under the fix. See
+  [Caching](docs/caching.md).
+
 - `notranslate` works with DeepL. The provider sent no `tag_handling`, and
   per DeepL's documentation "tags are treated as regular text" without it,
   so a span the tokenizer had marked as protected was translated anyway.
@@ -635,6 +609,23 @@ described below. Everything here is relative to `deepl_diff` 2.2.0.
   of escaping a bare `<` as `&lt;` to work around `ox` rather than replacing
   it with a lexer of this gem's own, which is out of scope here. `<b` cannot
   be told apart from a tag without one. Every other entity is decoded.
+
+### Security
+
+- `Configuration#inspect` and `Provider#inspect` print `[FILTERED]` in place
+  of every credential option's value, instead of the credential itself. The
+  filtered set is derived, not hand-maintained: option names matching a
+  sensitive pattern, plus whatever each registered provider declares in
+  `sensitive_options`. A non-credential option -- a base URL, a region,
+  `cache_namespace` -- stays visible in full. A URL-valued option that
+  carries a credential in its userinfo, `redis_url` included, has just that
+  part redacted (`rediss://default:[FILTERED]@cache.example.upstash.io:6379`);
+  the scheme, host, port and path stay visible. See
+  [Providers](docs/providers.md).
+
+## deepl_diff
+
+The releases below were published under the gem's former name, `deepl_diff`.
 
 ## [2.2.0] - 2026-09-07
 
@@ -724,7 +715,7 @@ No changes to `lib/`.
   `texts`/`escaped_size`) because they shadowed `Struct#values` and
   `Struct#size`.
 
-[3.1.0]: https://github.com/Halvanhelv/translation_diff/compare/v2.2.0...v3.1.0
+[1.0.0]: https://github.com/Halvanhelv/translation_diff/compare/v2.2.0...v1.0.0
 [2.2.0]: https://github.com/Halvanhelv/deepl_diff/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/Halvanhelv/deepl_diff/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Halvanhelv/deepl_diff/compare/v1.1.1...v2.0.0

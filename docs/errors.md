@@ -84,7 +84,7 @@ offending text and both numbers.
 counterparts raise when `to:` is missing or `nil`. It is a caller's mistake
 before it is a translation, and the message names the keyword.
 
-**Renamed in 3.1.0.** `TranslationDiff::Request::Error` is now
+**Renamed in translation_diff 1.0.0.** `TranslationDiff::Request::Error` is now
 `TranslationDiff::Translator::Error` and `TranslationDiff::Cache::Error` is
 now `TranslationDiff::SentenceCache::Error`; both classes they hung off are
 gone. `TranslationDiff::Chunker::Error` is gone with no replacement -- the
